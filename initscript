@@ -1,0 +1,23 @@
+#!/bin/sh
+
+LOG=/data/CaerusVision/caerusVisionRcLocal.log
+
+case "$1" in
+    start)
+        echo "$(date): Starting CaerusVision" >> $LOG
+        sleep 10
+        /usr/bin/python3 /data/CaerusVision/batteryGuard.py >> $LOG 2>&1 &
+        echo "$(date): CaerusVision started" >> $LOG
+        ;;
+    stop)
+        echo "$(date): Stopping CaerusVision" >> $LOG
+        kill $(pgrep -f blinkTest.py)
+        ;;
+    restart)
+        $0 stop
+        sleep 1
+        $0 start
+        ;;
+esac
+
+exit 0
