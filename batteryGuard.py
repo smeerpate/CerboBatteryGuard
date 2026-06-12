@@ -187,7 +187,7 @@ def mainLoop(bus):
 
             # Knop detectie
             try:
-                buttonPressed = readButton(bus)
+                buttonPressed = readButton()
                 if buttonPressed and not buttonWasPressed:
                     overrideActive = True
                     overrideUntil = now + timedelta(seconds=overrideDuration)
