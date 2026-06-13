@@ -150,7 +150,7 @@ def blinkThread(bus):
 # ─── Hoofdloop ────────────────────────────────────────────────────────────────
 
 def mainLoop(bus):
-    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown
+    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, lastLogState
 
     while True:
         try:
@@ -225,7 +225,10 @@ def mainLoop(bus):
                 else:
                     clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
 
-            logging.info(f"SOC: {soc}% | Override: {overrideActive} | Shutdown: {multiplusShutdown} | Alarmen: {activeAlarms}")
+            currentState = (round(soc, 0), overrideActive, multiplusShutdown, list(activeAlarms))
+            if currentState != lastLogState:
+                logging.info(f"SOC: {soc}% | Override: {overrideActive} | Shutdown: {multiplusShutdown} | Alarmen: {activeAlarms}")
+                lastLogState = currentState
 
         except Exception as e:
             logging.error(f"Fout in hoofdloop: {e}")
