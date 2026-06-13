@@ -1,17 +1,26 @@
 #!/bin/sh
 
 LOG=/data/CaerusVision/caerusVisionRcLocal.log
+MAX_LOGBYTES=10000
+
+rotatelog() {
+    if [ -f "$LOG" ] && [ $(wc -c < "$LOG") -gt $MAX_LOGBYTES ]; then
+        mv "$LOG" "${LOG}.1"
+    fi
+}
 
 case "$1" in
     start)
+        rotatelog
         echo "$(date): Starting CaerusVision" >> $LOG
         sleep 10
         /usr/bin/python3 /data/CaerusVision/batteryGuard.py >> $LOG 2>&1 &
         echo "$(date): CaerusVision started" >> $LOG
         ;;
     stop)
+        rotatelog
         echo "$(date): Stopping CaerusVision" >> $LOG
-        kill $(pgrep -f blinkTest.py)
+        kill $(pgrep -f batteryGuard.py)
         ;;
     restart)
         $0 stop
