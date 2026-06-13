@@ -61,6 +61,9 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s'
 )
 
+# DBUS thread safety (voor get Value en setValue)
+dbusLock = threading.Lock()
+
 # ─── D-Bus hulpfuncties ────────────────────────────────────────────────────────
 
 def waitForService(bus, serviceName, timeout=60):
@@ -77,12 +80,14 @@ def waitForService(bus, serviceName, timeout=60):
     return False
 
 def getValue(bus, service, path):
-    obj = bus.get_object(service, path)
-    return obj.GetValue(dbus_interface='com.victronenergy.BusItem')
+    with dbusLock:
+        obj = bus.get_object(service, path)
+        return obj.GetValue(dbus_interface='com.victronenergy.BusItem')
 
 def setValue(bus, service, path, value):
-    obj = bus.get_object(service, path)
-    obj.SetValue(value, dbus_interface='com.victronenergy.BusItem')
+    with dbusLock:
+        obj = bus.get_object(service, path)
+        obj.SetValue(value, dbus_interface='com.victronenergy.BusItem')
 
 def setRelay(bus, relayIndex, state):
     setValue(bus, 'com.victronenergy.system', f'/Relay/{relayIndex}/State', dbus.Int32(state))
