@@ -56,6 +56,7 @@ overrideActive   = False
 overrideUntil    = None
 buttonWasPressed = False
 multiplusShutdown = False
+lastLogState = None
 
 # Logging
 handler = RotatingFileHandler(
