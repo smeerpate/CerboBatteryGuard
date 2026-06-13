@@ -1,4 +1,18 @@
 # CerboBatteryGuard
+## Wat doet CerboBatteryGuard?
+CerboBatteryGuard is een Python service die draait op een Victron Cerbo GX en de laadtoestand (State of Charge, SOC) van een LiFePO4 batterijpakket bewaakt. Wanneer de SOC onder een kritische drempel zakt, schakelt de service de Victron Multiplus omvormer automatisch uit om diepontlading en blijvende schade aan de batterijen te voorkomen.
+
+## Waarom is dit nodig?
+Victron DVCC (Distributed Voltage and Current Control) laat het BMS toe om via CAN bus laad- en ontlaadstroomlimieten (CCL/DCL) door te geven aan de omvormer. Dit zijn stroomlimieten, geen SOC-limieten. Sommige BMS-systemen ondersteunen deze CCL/DCL communicatie niet. Zonder CCL/DCL kan DVCC zijn rol als beschermingslaag niet vervullen, maar dat lost het probleem van diepontlading nog steeds niet op: er is bij gebruik van DVCC geen ingebouwd Victron mechanisme dat de omvormer automatisch uitschakelt wanneer de SOC een kritische grens bereikt. CerboBatteryGuard vult precies dit gat op door de SOC continu te bewaken en de Multiplus uit te schakelen wanneer nodig.
+
+## Hoe werkt het?
+De service leest elke 5 seconden de SOC uit via D-Bus van het BMS, en stuurt de Multiplus aan via VE.Bus. Er zijn twee drempelwaarden:
+
+- Soft limit: de SOC daalt onder dit niveau, er wordt een waarschuwing gelogd maar de omvormer blijft aan.
+- Hard limit: de SOC daalt onder dit niveau, de omvormer wordt uitgeschakeld. Hij komt pas terug aan wanneer de SOC de hersteldrempel overschrijdt.
+
+Een fysieke drukknop op de Cerbo GX laat toe om de uitschakeling tijdelijk te overbruggen (override), bijvoorbeeld om in noodgevallen toch nog belasting te kunnen aansluiten. De override is tijdelijk en verloopt automatisch na een instelbare duur.
+De status wordt zichtbaar gemaakt via een LED die op een relay van de Cerbo GX is aangesloten. Bij normaal bedrijf brandt de LED continu. Bij een alarm knippert de LED een aantal keer dat overeenkomt met de alarmcode, zodat de toestand van het systeem ook zonder toegang tot de logs afgelezen kan worden.
 
 ## Initscipt
 ### Werking
