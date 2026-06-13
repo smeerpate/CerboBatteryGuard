@@ -1,6 +1,7 @@
 import dbus
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 import threading
 from datetime import datetime, timedelta
 
@@ -30,6 +31,8 @@ VEBUS_SERVICE   = 'com.victronenergy.vebus.ttyS4'
 BMS_SERVICE     = 'com.victronenergy.battery.socketcan_can1'
 MAX_LOGLINES    = 200
 LOG_FILE        = '/data/CaerusVision/caerusVision.log'
+MAX_LOGBYTES    = 20000 # 20kB ongeveer 200 lijnen
+
 # BMS alarm paden
 BMS_ALARM_PATHS = [
     '/Alarms/LowVoltage',
@@ -55,11 +58,13 @@ buttonWasPressed = False
 multiplusShutdown = False
 
 # Logging
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s'
+handler = RotatingFileHandler(
+    LOG_FILE,
+    maxBytes=MAX_LOGBYTES,
+    backupCount=1 # 1 bestand in backup houden
 )
+handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+logging.basicConfig(handlers=[handler], level=logging.INFO)
 
 # DBUS thread safety (voor get Value en setValue)
 dbusLock = threading.Lock()
@@ -98,16 +103,6 @@ def setMultiplus(bus, mode):
 def readButton(bus):
     val = getValue(bus, 'com.victronenergy.system', '/DigitalInput/1/State')
     return val == 1
-
-def trimLog(logFile, maxLines=200):
-    try:
-        with open(logFile, 'r') as f:
-            lines = f.readlines()
-        if len(lines) > maxLines:
-            with open(logFile, 'w') as f:
-                f.writelines(lines[-maxLines:])
-    except Exception as e:
-        logging.error(f"Fout bij trimmen log: {e}")
 
 # ─── Alarm beheer ─────────────────────────────────────────────────────────────
 
@@ -156,7 +151,6 @@ def blinkThread(bus):
 
 def mainLoop(bus):
     global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown
-    loopCount = 0
 
     while True:
         try:
@@ -235,11 +229,6 @@ def mainLoop(bus):
 
         except Exception as e:
             logging.error(f"Fout in hoofdloop: {e}")
-
-        loopCount += 1
-        if loopCount % 100 == 0:
-            trimLog(LOG_FILE, MAX_LOGLINES)
-            loopCount = 0
 
         time.sleep(5)
 
