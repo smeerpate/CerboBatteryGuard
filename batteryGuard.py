@@ -6,9 +6,9 @@ import threading
 from datetime import datetime, timedelta
 
 # Drempelwaarden
-socHardLimit = 71#10
-socSoftLimit = 73#15
-socRecover = 75#20
+socHardLimit = 10
+socSoftLimit = 15
+socRecover = 20
 tempMax = 35
 humidityMax = 70
 overrideDuration = 15 * 60
@@ -149,7 +149,7 @@ def blinkThread(bus):
         time.sleep(CYCLE_PAUSE)
 
 # ─── Hoofdloop ────────────────────────────────────────────────────────────────
-
+'''
 def mainLoop(bus):
     global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, lastLogState
 
@@ -230,6 +230,135 @@ def mainLoop(bus):
             if currentState != lastLogState:
                 logging.info(f"SOC: {soc}% | Override: {overrideActive} | Shutdown: {multiplusShutdown} | Alarmen: {activeAlarms}")
                 lastLogState = currentState
+
+        except Exception as e:
+            logging.error(f"Fout in hoofdloop: {e}")
+
+        time.sleep(5)
+''''
+STATE_INIT     = 'INIT'
+STATE_NORMAL   = 'NORMAL'
+STATE_SOC_LOW  = 'SOC_LOW'
+STATE_SHUTDOWN = 'SHUTDOWN'
+STATE_OVERRIDE = 'OVERRIDE'
+
+def mainLoop(bus):
+    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown
+
+    state = STATE_INIT
+    lastLogState = None
+
+    while True:
+        try:
+            now = datetime.now()
+
+            # ── SOC uitlezen ──────────────────────────────────────────────────
+            try:
+                soc = getValue(bus, BMS_SERVICE, '/Soc')
+                clearAlarm(ALARM_NO_BMS_COMM)
+            except dbus.exceptions.DBusException:
+                setAlarm(ALARM_NO_BMS_COMM)
+                logging.error("Geen BMS communicatie")
+                time.sleep(5)
+                continue
+
+            # ── BMS alarmen ───────────────────────────────────────────────────
+            try:
+                bmsAlarmActive = any(
+                    getValue(bus, BMS_SERVICE, path) != 0
+                    for path in BMS_ALARM_PATHS
+                )
+                if bmsAlarmActive:
+                    setAlarm(ALARM_BMS_ALARM)
+                else:
+                    clearAlarm(ALARM_BMS_ALARM)
+            except dbus.exceptions.DBusException:
+                pass
+
+            # ── Knop detectie ─────────────────────────────────────────────────
+            try:
+                buttonPressed = readButton(bus)
+                if buttonPressed and not buttonWasPressed:
+                    if state == STATE_SHUTDOWN:
+                        overrideUntil = now + timedelta(seconds=overrideDuration)
+                        state = STATE_OVERRIDE
+                        setMultiplus(bus, 3)
+                        multiplusShutdown = False
+                        logging.warning(f"Override geactiveerd tot {overrideUntil.strftime('%H:%M:%S')}")
+                buttonWasPressed = buttonPressed
+            except dbus.exceptions.DBusException:
+                pass
+
+            # ── State machine ─────────────────────────────────────────────────
+            if state == STATE_INIT:
+                if soc <= socHardLimit:
+                    state = STATE_SHUTDOWN
+                    setMultiplus(bus, 4)
+                    multiplusShutdown = True
+                    setAlarm(ALARM_SOC_CRITICAL)
+                    logging.warning(f"Opstart: Multiplus uitgeschakeld op SOC {soc}%")
+                elif soc <= socSoftLimit:
+                    state = STATE_SOC_LOW
+                    setMultiplus(bus, 3)
+                    multiplusShutdown = False
+                    logging.warning(f"Opstart: SOC laag ({soc}%), Multiplus aan")
+                else:
+                    state = STATE_NORMAL
+                    setMultiplus(bus, 3)
+                    multiplusShutdown = False
+                    logging.info(f"Opstart: SOC normaal ({soc}%), Multiplus aan")
+
+            elif state == STATE_NORMAL:
+                if soc <= socHardLimit:
+                    state = STATE_SHUTDOWN
+                    setMultiplus(bus, 4)
+                    multiplusShutdown = True
+                    setAlarm(ALARM_SOC_CRITICAL)
+                    logging.warning(f"Multiplus uitgeschakeld op SOC {soc}%")
+                elif soc <= socSoftLimit:
+                    state = STATE_SOC_LOW
+                    logging.warning(f"SOC laag: {soc}%")
+
+            elif state == STATE_SOC_LOW:
+                if soc <= socHardLimit:
+                    state = STATE_SHUTDOWN
+                    setMultiplus(bus, 4)
+                    multiplusShutdown = True
+                    setAlarm(ALARM_SOC_CRITICAL)
+                    logging.warning(f"Multiplus uitgeschakeld op SOC {soc}%")
+                elif soc > socSoftLimit:
+                    state = STATE_NORMAL
+                    logging.info(f"SOC hersteld: {soc}%")
+
+            elif state == STATE_SHUTDOWN:
+                if soc >= socRecover:
+                    state = STATE_NORMAL
+                    setMultiplus(bus, 3)
+                    multiplusShutdown = False
+                    clearAlarm(ALARM_SOC_CRITICAL)
+                    logging.info(f"Multiplus terug aan op SOC {soc}%")
+
+            elif state == STATE_OVERRIDE:
+                setAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
+                clearAlarm(ALARM_SOC_CRITICAL)
+                if now >= overrideUntil:
+                    logging.info("Override verlopen")
+                    if soc <= socHardLimit:
+                        state = STATE_SHUTDOWN
+                        setMultiplus(bus, 4)
+                        multiplusShutdown = True
+                        setAlarm(ALARM_SOC_CRITICAL)
+                        clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
+                        logging.warning(f"Multiplus uitgeschakeld na override op SOC {soc}%")
+                    else:
+                        state = STATE_NORMAL
+                        clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
+
+            # ── Logging bij verandering ───────────────────────────────────────
+            currentLogState = (round(soc, 0), state, sorted(activeAlarms))
+            if currentLogState != lastLogState:
+                logging.info(f"SOC: {soc}% | State: {state} | Alarmen: {activeAlarms}")
+                lastLogState = currentLogState
 
         except Exception as e:
             logging.error(f"Fout in hoofdloop: {e}")
