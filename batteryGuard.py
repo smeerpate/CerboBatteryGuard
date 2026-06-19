@@ -167,7 +167,7 @@ STATE_SHUTDOWN = 'SHUTDOWN'
 STATE_OVERRIDE = 'OVERRIDE'
 
 def mainLoop(bus):
-    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown
+    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, acConnected
 
     state = STATE_INIT
     lastLogState = None
@@ -210,6 +210,18 @@ def mainLoop(bus):
                         multiplusShutdown = False
                         logging.warning(f"Override geactiveerd tot {overrideUntil.strftime('%H:%M:%S')}")
                 buttonWasPressed = buttonPressed
+            except dbus.exceptions.DBusException:
+                pass
+
+            # ── AC-ingang bewaking ────────────────────────────────────────────
+            try:
+                acNowConnected = getValue(bus, VEBUS_SERVICE, '/Ac/ActiveIn/Connected') == 1
+                if acConnected is not None and acNowConnected != acConnected:
+                    if acNowConnected:
+                        logging.info("Netspanning aangesloten")
+                    else:
+                        logging.warning("Netspanning weggevallen")
+                acConnected = acNowConnected
             except dbus.exceptions.DBusException:
                 pass
 
