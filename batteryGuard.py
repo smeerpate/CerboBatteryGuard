@@ -235,7 +235,7 @@ def mainLoop(bus):
             logging.error(f"Fout in hoofdloop: {e}")
 
         time.sleep(5)
-''''
+'''
 STATE_INIT     = 'INIT'
 STATE_NORMAL   = 'NORMAL'
 STATE_SOC_LOW  = 'SOC_LOW'
