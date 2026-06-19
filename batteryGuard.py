@@ -19,6 +19,12 @@ ALARM_SOC_CRITICAL_OVERRIDE = 3
 ALARM_NO_BMS_COMM          = 4
 ALARM_BMS_ALARM            = 5
 
+# Victron Multiplus II modes
+MP2_CHARGER_ONLY = 1
+MP2_INVERTER_ONLY = 2
+MP2_ON = 3
+MP2_OFF = 4
+
 # Knipperparameters
 BLINK_ON_TIME   = 0.2
 BLINK_OFF_TIME  = 0.2
@@ -282,7 +288,7 @@ def mainLoop(bus):
                     if state == STATE_SHUTDOWN:
                         overrideUntil = now + timedelta(seconds=overrideDuration)
                         state = STATE_OVERRIDE
-                        setMultiplus(bus, 3)
+                        setMultiplus(bus, MP2_ON)
                         multiplusShutdown = False
                         logging.warning(f"Override geactiveerd tot {overrideUntil.strftime('%H:%M:%S')}")
                 buttonWasPressed = buttonPressed
@@ -293,25 +299,25 @@ def mainLoop(bus):
             if state == STATE_INIT:
                 if soc <= socHardLimit:
                     state = STATE_SHUTDOWN
-                    setMultiplus(bus, 4)
+                    setMultiplus(bus, MP2_CHARGER_ONLY)
                     multiplusShutdown = True
                     setAlarm(ALARM_SOC_CRITICAL)
                     logging.warning(f"Opstart: Multiplus uitgeschakeld op SOC {soc}%")
                 elif soc <= socSoftLimit:
                     state = STATE_SOC_LOW
-                    setMultiplus(bus, 3)
+                    setMultiplus(bus, MP2_ON)
                     multiplusShutdown = False
                     logging.warning(f"Opstart: SOC laag ({soc}%), Multiplus aan")
                 else:
                     state = STATE_NORMAL
-                    setMultiplus(bus, 3)
+                    setMultiplus(bus, MP2_ON)
                     multiplusShutdown = False
                     logging.info(f"Opstart: SOC normaal ({soc}%), Multiplus aan")
 
             elif state == STATE_NORMAL:
                 if soc <= socHardLimit:
                     state = STATE_SHUTDOWN
-                    setMultiplus(bus, 4)
+                    setMultiplus(bus, MP2_CHARGER_ONLY)
                     multiplusShutdown = True
                     setAlarm(ALARM_SOC_CRITICAL)
                     logging.warning(f"Multiplus uitgeschakeld op SOC {soc}%")
@@ -322,7 +328,7 @@ def mainLoop(bus):
             elif state == STATE_SOC_LOW:
                 if soc <= socHardLimit:
                     state = STATE_SHUTDOWN
-                    setMultiplus(bus, 4)
+                    setMultiplus(bus, MP2_CHARGER_ONLY)
                     multiplusShutdown = True
                     setAlarm(ALARM_SOC_CRITICAL)
                     logging.warning(f"Multiplus uitgeschakeld op SOC {soc}%")
@@ -333,7 +339,7 @@ def mainLoop(bus):
             elif state == STATE_SHUTDOWN:
                 if soc >= socRecover:
                     state = STATE_NORMAL
-                    setMultiplus(bus, 3)
+                    setMultiplus(bus, MP2_ON)
                     multiplusShutdown = False
                     clearAlarm(ALARM_SOC_CRITICAL)
                     logging.info(f"Multiplus terug aan op SOC {soc}%")
@@ -345,7 +351,7 @@ def mainLoop(bus):
                     logging.info("Override verlopen")
                     if soc <= socHardLimit:
                         state = STATE_SHUTDOWN
-                        setMultiplus(bus, 4)
+                        setMultiplus(bus, MP2_CHARGER_ONLY)
                         multiplusShutdown = True
                         setAlarm(ALARM_SOC_CRITICAL)
                         clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
