@@ -107,9 +107,14 @@ def setRelay(bus, relayIndex, state):
 def setMultiplus(bus, mode):
     setValue(bus, VEBUS_SERVICE, '/Mode', dbus.Int32(mode))
 
-def readButton(bus):
-    val = getValue(bus, 'com.victronenergy.system', '/DigitalInput/1/State')
-    return val == 1
+def readButton():
+    try:
+        with open('/dev/gpio/digital_input_1/value', 'r') as f:
+            val = f.read().strip()
+        return val == '0'   # actief laag: ingedrukt = 0
+    except (FileNotFoundError, OSError) as e:
+        logging.error(f"Fout bij lezen digitale input: {e}")
+        return False
 
 # ─── Alarm beheer ─────────────────────────────────────────────────────────────
 
@@ -155,93 +160,6 @@ def blinkThread(bus):
         time.sleep(CYCLE_PAUSE)
 
 # ─── Hoofdloop ────────────────────────────────────────────────────────────────
-'''
-def mainLoop(bus):
-    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, lastLogState
-
-    while True:
-        try:
-            now = datetime.now()
-
-            # SOC uitlezen
-            try:
-                soc = getValue(bus, BMS_SERVICE, '/Soc')
-                clearAlarm(ALARM_NO_BMS_COMM)
-            except dbus.exceptions.DBusException:
-                setAlarm(ALARM_NO_BMS_COMM)
-                logging.error("Geen BMS communicatie")
-                time.sleep(5)
-                continue
-
-            # BMS alarmen uitlezen
-            try:
-                bmsAlarmActive = any(
-                    getValue(bus, BMS_SERVICE, path) != 0
-                    for path in BMS_ALARM_PATHS
-                )
-                if bmsAlarmActive:
-                    setAlarm(ALARM_BMS_ALARM)
-                else:
-                    clearAlarm(ALARM_BMS_ALARM)
-            except dbus.exceptions.DBusException:
-                pass
-
-            # Knop detectie
-            try:
-                buttonPressed = readButton(bus)
-                if buttonPressed and not buttonWasPressed:
-                    overrideActive = True
-                    overrideUntil = now + timedelta(seconds=overrideDuration)
-                    logging.warning(f"Override geactiveerd tot {overrideUntil.strftime('%H:%M:%S')}")
-                    if multiplusShutdown:
-                        setMultiplus(bus, 3)
-                        multiplusShutdown = False
-                        logging.warning("Multiplus terug aan via override")
-                buttonWasPressed = buttonPressed
-            except dbus.exceptions.DBusException:
-                pass
-
-            # Override verlopen
-            if overrideActive and now >= overrideUntil:
-                overrideActive = False
-                logging.info("Override verlopen")
-
-            # SOC bewaking
-            if not overrideActive:
-                if soc <= socHardLimit and not multiplusShutdown:
-                    setMultiplus(bus, 4)
-                    multiplusShutdown = True
-                    setAlarm(ALARM_SOC_CRITICAL)
-                    clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
-                    logging.warning(f"Multiplus uitgeschakeld op SOC {soc}%")
-
-                elif soc <= socSoftLimit:
-                    logging.warning(f"SOC laag: {soc}%")
-
-                elif soc >= socRecover and multiplusShutdown:
-                    setMultiplus(bus, 3)
-                    multiplusShutdown = False
-                    clearAlarm(ALARM_SOC_CRITICAL)
-                    logging.info(f"Multiplus terug aan op SOC {soc}%")
-
-            else:
-                # Override actief
-                if soc <= socHardLimit:
-                    setAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
-                    clearAlarm(ALARM_SOC_CRITICAL)
-                else:
-                    clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
-
-            currentState = (round(soc, 0), overrideActive, multiplusShutdown, list(activeAlarms))
-            if currentState != lastLogState:
-                logging.info(f"SOC: {soc}% | Override: {overrideActive} | Shutdown: {multiplusShutdown} | Alarmen: {activeAlarms}")
-                lastLogState = currentState
-
-        except Exception as e:
-            logging.error(f"Fout in hoofdloop: {e}")
-
-        time.sleep(5)
-'''
 STATE_INIT     = 'INIT'
 STATE_NORMAL   = 'NORMAL'
 STATE_SOC_LOW  = 'SOC_LOW'
@@ -283,7 +201,7 @@ def mainLoop(bus):
 
             # ── Knop detectie ─────────────────────────────────────────────────
             try:
-                buttonPressed = readButton(bus)
+                buttonPressed = readButton()
                 if buttonPressed and not buttonWasPressed:
                     if state == STATE_SHUTDOWN:
                         overrideUntil = now + timedelta(seconds=overrideDuration)
