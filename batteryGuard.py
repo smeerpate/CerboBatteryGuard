@@ -4,6 +4,9 @@ import logging
 from logging.handlers import RotatingFileHandler
 import threading
 from datetime import datetime, timedelta
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+from caerusvisionDBusService import CaerusVisionDbusService
 
 # Drempelwaarden
 socHardLimit = 10
@@ -78,6 +81,10 @@ logging.basicConfig(handlers=[handler], level=logging.INFO)
 # DBUS thread safety (voor get Value en setValue)
 dbusLock = threading.Lock()
 
+# GUI plugin (gui-v2 Settings -> Integrations -> CaerusVision)
+guiLock = threading.Lock()
+guiOverrideRequested = False
+
 # ─── D-Bus hulpfuncties ────────────────────────────────────────────────────────
 
 def waitForService(bus, serviceName, timeout=60):
@@ -126,6 +133,24 @@ def readManualSwitch():
     except (FileNotFoundError, OSError) as e:
         logging.error(f"Fout bij lezen digitale input 2 (schakelaar): {e}")
         return False
+
+# ─── GUI plugin callback ───────────────────────────────────────────────────────
+
+def handleOverrideRequest(requested):
+    """
+    Aangeroepen door CaerusVisionDbusService zodra iemand op de override-
+    knop in de gui-v2 pagina drukt. We zetten enkel een vlag; de eigenlijke
+    overgang naar STATE_OVERRIDE gebeurt in mainLoop(), op dezelfde manier
+    en met dezelfde voorwaarde (alleen vanuit STATE_SHUTDOWN) als de
+    fysieke knop. Er is momenteel geen manier om een override vanop afstand
+    te annuleren - dat verloopt nog steeds enkel via overrideDuration.
+    """
+    global guiOverrideRequested
+    if requested:
+        with guiLock:
+            guiOverrideRequested = True
+        logging.info("Override aangevraagd via GUI")
+    return True
 
 # ─── Alarm beheer ─────────────────────────────────────────────────────────────
 
@@ -179,7 +204,7 @@ STATE_OVERRIDE = 'OVERRIDE'
 STATE_MANUAL_OFF = 'MANUAL_OFF'
 
 def mainLoop(bus):
-    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, acConnected, manualSwitchWasActive
+    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, acConnected, manualSwitchWasActive, guiOverrideRequested
 
     state = STATE_INIT
     lastLogState = None
@@ -224,6 +249,20 @@ def mainLoop(bus):
                 buttonWasPressed = buttonPressed
             except dbus.exceptions.DBusException:
                 pass
+
+            # ── Override-aanvraag vanuit GUI (zelfde voorwaarde als de knop) ───
+            with guiLock:
+                guiRequestPending = guiOverrideRequested
+                guiOverrideRequested = False
+            if guiRequestPending:
+                if state == STATE_SHUTDOWN:
+                    overrideUntil = now + timedelta(seconds=overrideDuration)
+                    state = STATE_OVERRIDE
+                    setMultiplus(bus, MP2_ON)
+                    multiplusShutdown = False
+                    logging.warning(f"Override geactiveerd via GUI tot {overrideUntil.strftime('%H:%M:%S')}")
+                else:
+                    logging.info(f"Override via GUI genegeerd: status is {state}, niet SHUTDOWN")
 
             # ── AC-ingang bewaking ────────────────────────────────────────────
             try:
@@ -320,6 +359,10 @@ def mainLoop(bus):
             elif state == STATE_MANUAL_OFF:
                 setMultiplus(bus, MP2_CHARGER_ONLY)  # periodiek herschrijven, ook na herstart Multiplus
 
+            # ── GUI plugin bijwerken ──────────────────────────────────────────
+            guiService.updateState(state)
+            guiService.updateTelemetry(soc=soc, socHardLimit=socHardLimit, socSoftLimit=socSoftLimit)
+
             # ── Logging bij verandering ───────────────────────────────────────
             currentLogState = (round(soc, 0), state, sorted(activeAlarms))
             if currentLogState != lastLogState:
@@ -333,6 +376,7 @@ def mainLoop(bus):
 
 # ─── Opstart ──────────────────────────────────────────────────────────────────
 
+DBusGMainLoop(set_as_default=True)
 bus = dbus.SystemBus()
 
 if not waitForService(bus, 'com.victronenergy.system'):
@@ -354,6 +398,14 @@ time.sleep(CYCLE_PAUSE)
 # Knipperthread starten
 blinker = threading.Thread(target=blinkThread, args=(bus,), daemon=True)
 blinker.start()
+
+# GUI plugin service starten + GLib-lus draaien voor binnenkomende calls
+# (zonder draaiende lus verwerkt dbus-python geen SetValue vanaf de GUI)
+guiService = CaerusVisionDbusService(guiLock, handleOverrideRequest)
+glibLoop = GLib.MainLoop()
+glibThread = threading.Thread(target=glibLoop.run, daemon=True)
+glibThread.start()
+
 logging.info("CaerusVision Battery Guard gestart")
 
 # Hoofdloop
