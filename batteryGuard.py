@@ -64,6 +64,7 @@ buttonWasPressed = False
 multiplusShutdown = False
 lastLogState = None
 acConnected = None
+manualSwitchWasActive = False
 
 # Logging
 handler = RotatingFileHandler(
@@ -114,7 +115,16 @@ def readButton():
             val = f.read().strip()
         return val == '0'   # actief laag: ingedrukt = 0
     except (FileNotFoundError, OSError) as e:
-        logging.error(f"Fout bij lezen digitale input: {e}")
+        logging.error(f"Fout bij lezen digitale input 1 (knop): {e}")
+        return False
+
+def readManualSwitch():
+    try:
+        with open('/dev/gpio/digital_input_2/value', 'r') as f:
+            val = f.read().strip()
+        return val == '0'   # actief laag
+    except (FileNotFoundError, OSError) as e:
+        logging.error(f"Fout bij lezen digitale input 2 (schakelaar): {e}")
         return False
 
 # ─── Alarm beheer ─────────────────────────────────────────────────────────────
@@ -166,9 +176,10 @@ STATE_NORMAL   = 'NORMAL'
 STATE_SOC_LOW  = 'SOC_LOW'
 STATE_SHUTDOWN = 'SHUTDOWN'
 STATE_OVERRIDE = 'OVERRIDE'
+STATE_MANUAL_OFF = 'MANUAL_OFF'
 
 def mainLoop(bus):
-    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, acConnected
+    global overrideActive, overrideUntil, buttonWasPressed, multiplusShutdown, acConnected, manualSwitchWasActive
 
     state = STATE_INIT
     lastLogState = None
@@ -226,6 +237,19 @@ def mainLoop(bus):
             except dbus.exceptions.DBusException:
                 pass
 
+            # ── Handmatige schakelaar (omvormer geforceerd uit) ─────────────────
+            manualSwitchActive = readManualSwitch()
+            if manualSwitchActive != manualSwitchWasActive:
+                if manualSwitchActive:
+                    state = STATE_MANUAL_OFF
+                    setMultiplus(bus, MP2_CHARGER_ONLY)
+                    multiplusShutdown = True
+                    logging.warning("Schakelaar omgezet: omvormer handmatig UIT (laden blijft mogelijk)")
+                else:
+                    state = STATE_INIT
+                    logging.info("Schakelaar omgezet: omvormer terug naar automatische werking")
+            manualSwitchWasActive = manualSwitchActive
+
             # ── State machine ─────────────────────────────────────────────────
             if state == STATE_INIT:
                 if soc <= socHardLimit:
@@ -274,6 +298,8 @@ def mainLoop(bus):
                     multiplusShutdown = False
                     clearAlarm(ALARM_SOC_CRITICAL)
                     logging.info(f"Multiplus terug aan op SOC {soc}%")
+                else:
+                    setMultiplus(bus, MP2_CHARGER_ONLY)  # periodiek herschrijven, ook na herstart Multiplus
 
             elif state == STATE_OVERRIDE:
                 setAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
@@ -290,6 +316,9 @@ def mainLoop(bus):
                     else:
                         state = STATE_NORMAL
                         clearAlarm(ALARM_SOC_CRITICAL_OVERRIDE)
+
+            elif state == STATE_MANUAL_OFF:
+                setMultiplus(bus, MP2_CHARGER_ONLY)  # periodiek herschrijven, ook na herstart Multiplus
 
             # ── Logging bij verandering ───────────────────────────────────────
             currentLogState = (round(soc, 0), state, sorted(activeAlarms))
