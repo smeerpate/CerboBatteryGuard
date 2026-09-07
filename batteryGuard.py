@@ -161,17 +161,6 @@ def readSmoke():
         logging.error(f"Fout bij lezen digitale input 3 (rookdetector): {e}")
         return False  # bij leesfout geen vals alarm genereren
 
-def setCerboAlarm(bus, active):
-    """
-    Schrijft een systeemalarm naar de Cerbo GX zodat het zichtbaar wordt
-    op het display en in VRM.
-    Waarde: 0 = OK, 1 = waarschuwing, 2 = alarm.
-    """
-    try:
-        alarmValue = dbus.Int32(2 if active else 0)
-        setValue(bus, 'com.victronenergy.system', '/Alarm', alarmValue)
-    except dbus.exceptions.DBusException as e:
-        logging.warning(f"Kon Cerbo systeemalarm niet schrijven: {e}")
 
 # ─── Alarm beheer ─────────────────────────────────────────────────────────────
 
@@ -240,10 +229,8 @@ def mainLoop(bus):
                 if ALARM_SMOKE not in activeAlarms:
                     logging.critical("ROOKALARM gedetecteerd op DIN3!")
                 setAlarm(ALARM_SMOKE)
-                setCerboAlarm(bus, True)
             else:
                 clearAlarm(ALARM_SMOKE)
-                setCerboAlarm(bus, False)
 
             # ── SOC uitlezen ──────────────────────────────────────────────────
             try:
