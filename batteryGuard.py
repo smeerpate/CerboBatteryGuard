@@ -14,10 +14,11 @@ humidityMax = 70
 overrideDuration = 15 * 60
 
 # Alarmcodes
-ALARM_SOC_CRITICAL         = 2
+ALARM_SOC_CRITICAL          = 2
 ALARM_SOC_CRITICAL_OVERRIDE = 3
-ALARM_NO_BMS_COMM          = 4
-ALARM_BMS_ALARM            = 5
+ALARM_NO_BMS_COMM           = 4
+ALARM_BMS_ALARM             = 5
+ALARM_SMOKE                 = 6   # Rookdetector DIN3: 6x knipperen
 
 # Victron Multiplus II modes
 MP2_CHARGER_ONLY = 1
@@ -38,6 +39,13 @@ BMS_SERVICE     = 'com.victronenergy.battery.socketcan_can1'
 MAX_LOGLINES    = 200
 LOG_FILE        = '/data/CaerusVision/caerusVision.log'
 MAX_LOGBYTES    = 20000 # 20kB ongeveer 200 lijnen
+
+# Rookdetector instellingen
+# DIN3 is aangesloten op het relaiscontact van de Abus rookdetector (12V)
+# Jumperinstelling op de rookdetector:
+#   SMOKE_NC = True  → NC (Normally Closed): contact opent bij rook → DIN3 gaat hoog  (aanbevolen, fail-safe)
+#   SMOKE_NC = False → NO (Normally Open):   contact sluit bij rook → DIN3 gaat laag
+SMOKE_NC = True
 
 # BMS alarm paden
 BMS_ALARM_PATHS = [
@@ -75,7 +83,7 @@ handler = RotatingFileHandler(
 handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
 logging.basicConfig(handlers=[handler], level=logging.INFO)
 
-# DBUS thread safety (voor get Value en setValue)
+# DBUS thread safety (voor getValue en setValue)
 dbusLock = threading.Lock()
 
 # ─── D-Bus hulpfuncties ────────────────────────────────────────────────────────
@@ -127,6 +135,44 @@ def readManualSwitch():
         logging.error(f"Fout bij lezen digitale input 2 (schakelaar): {e}")
         return False
 
+def readSmoke():
+    """
+    Leest DIN3 uit en geeft True terug als rook gedetecteerd is.
+    De Cerbo GX digitale ingangen zijn intern pull-up:
+      open circuit → hoog ('1'), kortgesloten naar GND → laag ('0')
+
+    NC-modus (SMOKE_NC=True, aanbevolen):
+      Normaal: contact gesloten → GND → '0' → geen rook
+      Rook:    contact opent   → pull-up → '1' → alarm
+      Kabelfout/stroomuitval detector → ook '1' → fail-safe alarm
+
+    NO-modus (SMOKE_NC=False):
+      Normaal: contact open   → pull-up → '1' → geen rook
+      Rook:    contact sluit  → GND     → '0' → alarm
+    """
+    try:
+        with open('/dev/gpio/digital_input_3/value', 'r') as f:
+            val = f.read().strip()
+        if SMOKE_NC:
+            return val == '1'   # NC: opent bij rook → gaat hoog
+        else:
+            return val == '0'   # NO: sluit bij rook → gaat laag
+    except (FileNotFoundError, OSError) as e:
+        logging.error(f"Fout bij lezen digitale input 3 (rookdetector): {e}")
+        return False  # bij leesfout geen vals alarm genereren
+
+def setCerboAlarm(bus, active):
+    """
+    Schrijft een systeemalarm naar de Cerbo GX zodat het zichtbaar wordt
+    op het display en in VRM.
+    Waarde: 0 = OK, 1 = waarschuwing, 2 = alarm.
+    """
+    try:
+        alarmValue = dbus.Int32(2 if active else 0)
+        setValue(bus, 'com.victronenergy.system', '/Alarm', alarmValue)
+    except dbus.exceptions.DBusException as e:
+        logging.warning(f"Kon Cerbo systeemalarm niet schrijven: {e}")
+
 # ─── Alarm beheer ─────────────────────────────────────────────────────────────
 
 def setAlarm(alarmCode):
@@ -171,11 +217,11 @@ def blinkThread(bus):
         time.sleep(CYCLE_PAUSE)
 
 # ─── Hoofdloop ────────────────────────────────────────────────────────────────
-STATE_INIT     = 'INIT'
-STATE_NORMAL   = 'NORMAL'
-STATE_SOC_LOW  = 'SOC_LOW'
-STATE_SHUTDOWN = 'SHUTDOWN'
-STATE_OVERRIDE = 'OVERRIDE'
+STATE_INIT       = 'INIT'
+STATE_NORMAL     = 'NORMAL'
+STATE_SOC_LOW    = 'SOC_LOW'
+STATE_SHUTDOWN   = 'SHUTDOWN'
+STATE_OVERRIDE   = 'OVERRIDE'
 STATE_MANUAL_OFF = 'MANUAL_OFF'
 
 def mainLoop(bus):
@@ -187,6 +233,17 @@ def mainLoop(bus):
     while True:
         try:
             now = datetime.now()
+
+            # ── Rookdetector DIN3 ─────────────────────────────────────────────
+            smoke = readSmoke()
+            if smoke:
+                if ALARM_SMOKE not in activeAlarms:
+                    logging.critical("ROOKALARM gedetecteerd op DIN3!")
+                setAlarm(ALARM_SMOKE)
+                setCerboAlarm(bus, True)
+            else:
+                clearAlarm(ALARM_SMOKE)
+                setCerboAlarm(bus, False)
 
             # ── SOC uitlezen ──────────────────────────────────────────────────
             try:
@@ -321,9 +378,9 @@ def mainLoop(bus):
                 setMultiplus(bus, MP2_CHARGER_ONLY)  # periodiek herschrijven, ook na herstart Multiplus
 
             # ── Logging bij verandering ───────────────────────────────────────
-            currentLogState = (round(soc, 0), state, sorted(activeAlarms))
+            currentLogState = (round(soc, 0), state, smoke, sorted(activeAlarms))
             if currentLogState != lastLogState:
-                logging.info(f"SOC: {soc}% | State: {state} | Alarmen: {activeAlarms}")
+                logging.info(f"SOC: {soc}% | State: {state} | Rook: {smoke} | Alarmen: {activeAlarms}")
                 lastLogState = currentLogState
 
         except Exception as e:
