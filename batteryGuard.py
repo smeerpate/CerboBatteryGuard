@@ -31,6 +31,7 @@ BLINK_ON_TIME   = 0.2
 BLINK_OFF_TIME  = 0.2
 BLINK_PAUSE     = 1.0
 CYCLE_PAUSE     = 3.0
+HEARTBEAT_INTERVAL = 60   # seconden tussen hartslagflitsen in normaal bedrijf
 
 # Andere constanten en parameters
 LED_RELAY       = 2
@@ -187,30 +188,42 @@ def clearAlarm(alarmCode):
 # ─── Knipperthread ────────────────────────────────────────────────────────────
 
 def blinkThread(bus):
+    lastHeartbeat = time.time()
+    threadError = False
     while True:
-        with alarmsLock:
-            currentAlarms = list(activeAlarms)
-
-        if not currentAlarms:
-            # Normaal bedrijf: lamp continu aan
-            setRelay(bus, LED_RELAY-1, 1)
-            time.sleep(0.5)
-            continue
-
-        # Alarmen actief: lamp eerst uit
-        setRelay(bus, LED_RELAY-1, 0)
-        time.sleep(0.5)
-
-        for alarmCode in currentAlarms:
-            # X keer knipperen
-            for _ in range(alarmCode):
-                setRelay(bus, LED_RELAY-1, 1)
-                time.sleep(BLINK_ON_TIME)
+        try:
+            with alarmsLock:
+                currentAlarms = list(activeAlarms)
+            if not currentAlarms:
+                # Normaal bedrijf: lamp uit, periodiek 1x oplichten als hartslag
+                if time.time() - lastHeartbeat >= HEARTBEAT_INTERVAL:
+                    setRelay(bus, LED_RELAY-1, 1)
+                    time.sleep(BLINK_ON_TIME)
+                    lastHeartbeat = time.time()
                 setRelay(bus, LED_RELAY-1, 0)
-                time.sleep(BLINK_OFF_TIME)
-            time.sleep(BLINK_PAUSE)
+                waitTime = 0.5
+            else:
+                # Alarmen actief: per alarm X keer oplichten
+                for alarmCode in currentAlarms:
+                    for _ in range(alarmCode):
+                        setRelay(bus, LED_RELAY-1, 1)
+                        time.sleep(BLINK_ON_TIME)
+                        setRelay(bus, LED_RELAY-1, 0)
+                        time.sleep(BLINK_OFF_TIME)
+                    time.sleep(BLINK_PAUSE)
+                waitTime = CYCLE_PAUSE
+                lastHeartbeat = time.time()
+                if threadError:
+                    logging.info("Knipperthread hersteld")
+                    threadError = False
 
-        time.sleep(CYCLE_PAUSE)
+        except Exception as e:
+            if not threadError:
+                logging.error(f"Fout in knipperthread: {e}")
+                threadError = True
+            waitTime = 2
+
+        time.sleep(waitTime)
 
 # ─── Hoofdloop ────────────────────────────────────────────────────────────────
 STATE_INIT       = 'INIT'
