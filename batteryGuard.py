@@ -34,6 +34,7 @@ CYCLE_PAUSE     = 3.0
 
 # Andere constanten en parameters
 LED_RELAY       = 2
+POWER_RELAY     = 1     # NO-contact Relay1: gesloten zolang de omvormer aan staat
 VEBUS_SERVICE   = 'com.victronenergy.vebus.ttyS4'
 BMS_SERVICE     = 'com.victronenergy.battery.socketcan_vecan1'
 MAX_LOGLINES    = 200
@@ -115,7 +116,13 @@ def setRelay(bus, relayIndex, state):
     setValue(bus, 'com.victronenergy.system', f'/Relay/{relayIndex}/State', dbus.Int32(state))
 
 def setMultiplus(bus, mode):
-    setValue(bus, VEBUS_SERVICE, '/Mode', dbus.Int32(mode))
+    inverterOn = mode in (MP2_ON, MP2_INVERTER_ONLY)
+    if inverterOn:
+        setValue(bus, VEBUS_SERVICE, '/Mode', dbus.Int32(mode))
+        setRelay(bus, POWER_RELAY-1, 1)
+    else:
+        setRelay(bus, POWER_RELAY-1, 0)
+        setValue(bus, VEBUS_SERVICE, '/Mode', dbus.Int32(mode))
 
 def readButton():
     try:
