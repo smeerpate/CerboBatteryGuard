@@ -35,7 +35,7 @@ CYCLE_PAUSE     = 3.0
 # Andere constanten en parameters
 LED_RELAY       = 2
 VEBUS_SERVICE   = 'com.victronenergy.vebus.ttyS4'
-BMS_SERVICE     = 'com.victronenergy.battery.socketcan_can1'
+BMS_SERVICE     = 'com.victronenergy.battery.socketcan_vecan1'
 MAX_LOGLINES    = 200
 LOG_FILE        = '/data/CaerusVision/caerusVision.log'
 MAX_LOGBYTES    = 20000 # 20kB ongeveer 200 lijnen
