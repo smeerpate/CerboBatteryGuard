@@ -11,8 +11,66 @@ De service leest elke 5 seconden de SOC uit via D-Bus van het BMS, en stuurt de 
 - Soft limit: de SOC daalt onder dit niveau, er wordt een waarschuwing gelogd maar de omvormer blijft aan.
 - Hard limit: de SOC daalt onder dit niveau, de omvormer wordt uitgeschakeld. Hij komt pas terug aan wanneer de SOC de hersteldrempel overschrijdt.
 
-Een fysieke drukknop op de Cerbo GX laat toe om de uitschakeling tijdelijk te overbruggen (override), bijvoorbeeld om in noodgevallen toch nog belasting te kunnen aansluiten. De override is tijdelijk en verloopt automatisch na een instelbare duur.
-De status wordt zichtbaar gemaakt via een LED die op een relay van de Cerbo GX is aangesloten. Bij normaal bedrijf brandt de LED continu. Bij een alarm knippert de LED een aantal keer dat overeenkomt met de alarmcode, zodat de toestand van het systeem ook zonder toegang tot de logs afgelezen kan worden.
+Een fysieke drukknop op de Cerbo GX laat toe om de uitschakeling tijdelijk te overbruggen (override), bijvoorbeeld om in noodgevallen toch nog belasting te kunnen aansluiten. Zie [Override](#override).
+
+De status wordt zichtbaar gemaakt via een LED op een relais van de Cerbo GX, zodat de toestand van het systeem ook zonder toegang tot de logs afgelezen kan worden. Zie [Statusled](#statusled).
+
+## Statusled
+De LED is aangesloten op Relay2 van de Cerbo GX (D-Bus `/Relay/1`). Het relais moet in de Cerbo-instellingen op functie *Manual* staan.
+
+### Opstart
+Bij het starten van de service licht de LED 3 keer kort op, gevolgd door een pauze van 3 seconden.
+
+### Normaal bedrijf
+De LED is uit. Om de 60 seconden licht ze 1 keer kort op als hartslag. Zo is te zien dat de service nog draait. Een LED die langer dan een minuut volledig uit blijft, wijst op een gestopte service of een Cerbo zonder voeding.
+
+### Alarmen
+Bij een actief alarm licht de LED per alarm een aantal keer kort op (0,2 s aan, 0,2 s uit). Het aantal is de alarmcode:
+
+| Aantal | Alarm |
+|---|---|
+| 2x | SOC kritisch: SOC onder de hard limit, omvormer uitgeschakeld (alleen laden) |
+| 3x | SOC kritisch met override actief: omvormer tijdelijk terug aan via de drukknop |
+| 4x | Geen communicatie met het BMS |
+| 5x | Alarm gemeld door het BMS |
+| 6x | Rookdetector (DIN3) |
+
+Zijn er meerdere alarmen tegelijk actief, dan worden ze na elkaar getoond in oplopende volgorde, met 1 seconde pauze tussen de alarmen en 3 seconden pauze na de volledige reeks. Daarna begint de reeks opnieuw.
+
+Een nieuw of gewist alarm wordt pas zichtbaar na de lopende reeks.
+
+### Fouten
+Als het aansturen van het relais mislukt (bijvoorbeeld tijdens een herstart van de Victron-services), wordt dit één keer gelogd en probeert de service het elke 2 seconden opnieuw. Zodra het weer lukt, verschijnt "Knipperthread hersteld" in de log.
+
+Als de service stopt of crasht, blijft het relais in zijn laatste stand staan.
+
+## Override
+Wanneer de omvormer uitgeschakeld is door een kritische SOC, kan hij met een drukknop tijdelijk terug aangezet worden.
+
+### Parameters
+De parameters staan bovenaan `batteryGuard.py`:
+
+| Parameter | Waarde | Betekenis |
+|---|---|---|
+| `overrideDuration` | 900 s (15 min) | Duur van de override |
+| `socHardLimit` | 10 % | SOC waaronder de omvormer uitgeschakeld wordt (alleen laden) |
+| `socRecover` | 20 % | SOC waarboven de omvormer zonder override automatisch terug aan gaat |
+
+De drukknop is aangesloten op digitale ingang 1 (DIN1) van de Cerbo GX en is actief laag: ingedrukt is `0`.
+
+### Werking
+- De knop werkt alleen wanneer de omvormer uitgeschakeld is door een kritische SOC (status SHUTDOWN). In andere toestanden heeft de knop geen effect.
+- Na een druk op de knop gaat de omvormer aan voor de duur van `overrideDuration`. De LED toont dan alarmcode 3x.
+- Tijdens de override wordt de SOC niet bewaakt. De batterij kan in die periode verder ontladen onder `socHardLimit`.
+- Opnieuw drukken tijdens een lopende override verlengt de override niet.
+- De knop wordt om de 5 seconden uitgelezen. Hou de knop ongeveer 5 seconden ingedrukt, anders kan een korte druk gemist worden.
+
+### Na afloop van de override
+- SOC ≤ `socHardLimit`: de omvormer wordt opnieuw uitgeschakeld (alleen laden). De LED toont terug 2x.
+- SOC > `socHardLimit`: de omvormer blijft aan en de service keert terug naar normaal bedrijf, ook als de SOC nog onder `socRecover` ligt. Zakt de SOC daarna terug tot `socHardLimit`, dan wordt de omvormer opnieuw uitgeschakeld.
+
+### Handmatige schakelaar
+Staat de handmatige schakelaar (DIN2) op "omvormer uit", dan heeft de override geen effect: de omvormer blijft in alleen-laden.
 
 ## Initscipt
 ### Werking
