@@ -211,11 +211,11 @@ def blinkThread(bus):
                         setRelay(bus, LED_RELAY-1, 0)
                         time.sleep(BLINK_OFF_TIME)
                     time.sleep(BLINK_PAUSE)
-                waitTime = CYCLE_PAUSE
-                lastHeartbeat = time.time()
-                if threadError:
-                    logging.info("Knipperthread hersteld")
-                    threadError = False
+            waitTime = CYCLE_PAUSE
+            lastHeartbeat = time.time()
+            if threadError:
+                logging.info("Knipperthread hersteld")
+                threadError = False
 
         except Exception as e:
             if not threadError:
